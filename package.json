@@ -1,0 +1,11 @@
+{
+  "name": "pi-meta",
+  "version": "0.1.0",
+  "description": "A conversational meta-channel for pi: open a linked child 'meta' session to discuss a target session, then non-destructively elide spent regions from the target's view via the context event. The on-disk log is never modified.",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "files": ["src/**/*.ts", "README.md"],
+  "keywords": ["pi-package"],
+  "license": "MIT"
+}
