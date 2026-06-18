@@ -18,13 +18,13 @@ function buildErrorResult(text: string): ToolResult {
 
 function scopeToolToMetaSessions(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
-		const active = new Set(ctx.getActiveTools());
+		const active = new Set(pi.getActiveTools());
 		if (isMetaSession(ctx.sessionManager)) {
 			active.add(ELIDE_TOOL);
 		} else {
 			active.delete(ELIDE_TOOL);
 		}
-		ctx.setActiveTools([...active]);
+		pi.setActiveTools([...active]);
 	});
 }
 
