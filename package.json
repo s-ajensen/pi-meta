@@ -1,7 +1,7 @@
 {
   "name": "pi-meta",
-  "version": "0.1.0",
-  "description": "A conversational meta-channel for pi: open a linked child 'meta' session to discuss a target session, then non-destructively elide spent regions from the target's view via the context event. The on-disk log is never modified.",
+  "version": "0.2.0",
+  "description": "A conversational meta-channel for pi: open a linked child 'meta' session to discuss a target session, then non-destructively elide spent regions by branching the append-only session tree. Elided runs collapse to a synopsis (model + TUI); verbatim is preserved on the prior branch and expandable.",
   "pi": {
     "extensions": ["./src/index.ts"]
   },

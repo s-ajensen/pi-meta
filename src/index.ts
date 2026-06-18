@@ -1,145 +1,133 @@
 /**
  * pi-meta — a conversational meta-channel for pi.
  *
- * Three surfaces, one auto-loaded extension:
+ * Two commands, one meta-scoped tool, one renderer, one scoping guard:
  *
- *  1. `/meta [task]`  (run from a TARGET session)
- *       Opens — or resumes — a linked child "meta" session: a normal pi session
- *       whose job is to talk WITH you about the target session and decide what to
- *       elide from its view. Creates the link on first use, resumes it after.
+ *  /meta [task]   (target session) → open/resume a linked child "meta" session
+ *                  to discuss what to elide. Link is native (parentSession).
+ *  /back          (meta session)   → PURE NAVIGATION back to the target. Elisions
+ *                  were already applied at tool-call time; nothing to consume.
+ *  elide_region   (tool, meta only) → opens the target file via the SDK
+ *                  SessionManager, validates the region, and applies a branch-
+ *                  elision directly to disk. No payload travels between sessions.
+ *  meta-elided    (renderer)        → collapsed synopsis banner / expanded greyed
+ *                  verbatim.
+ *  session_start  (guard)           → activates elide_region ONLY in meta
+ *                  sessions; strips it everywhere else, authoritatively, on every
+ *                  session start (defeats active-tool carry-forward).
  *
- *  2. `/back`  (run from a META session)
- *       Switches back to the target session this meta session belongs to.
- *
- *  3. context handler  (runs in EVERY session)
- *       In a target session, reads the sidecar and applies its `ops` to the
- *       in-flight message array (currently: `elide`). No sidecar / no ops -> the
- *       messages pass through untouched, so meta sessions and unrelated sessions
- *       are unaffected. The on-disk .jsonl is NEVER modified.
- *
- * State lives in two places, both inside the session ecosystem (no central
- * registry):
- *   - TARGET side: `<target>.jsonl.meta.json` sidecar -> { metaSession, ops }
- *   - META side:   a `meta-target` custom entry -> { targetSession } (reverse link)
+ * Eliding is append-only branching: the record is never overwritten. The LLM
+ * sees the synopsis (entry content); the verbatim lives in details (never sent).
+ * No sidecar — all links are pi-native.
  */
 
+import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readSidecar, patchSidecar, type MetaSidecar } from "./sidecar.ts";
-import { applyOps } from "./ops.ts";
+import { ELIDED_TYPE, openAndElide } from "./ops.ts";
+import { makeElidedRenderer } from "./render.ts";
+import {
+	isMetaSession,
+	targetOfMeta,
+	findMetaChild,
+	metaSessionName,
+	seedPrompt,
+} from "./meta-session.ts";
 
-/** customType used for the reverse link entry stored in the meta session. */
-const META_TARGET = "meta-target";
-
-interface MetaTargetData {
-	targetSession: string;
-}
-
-/** The seed prompt planted into a freshly-created meta session. Teaches the
- *  meta-agent its job, the sidecar contract, and the hard rule: never edit the
- *  target .jsonl. */
-function seedPrompt(targetSession: string, sidecarPath: string, task: string): string {
-	return [
-		`You are the META thread for another pi session (the "target").`,
-		``,
-		`Target session log (read-only to you): ${targetSession}`,
-		`Sidecar you will author:           ${sidecarPath}`,
-		``,
-		`Your job: help the human decide what to elide from the TARGET session's`,
-		`VIEW — the messages its agent sees on each call. The on-disk log is the`,
-		`durable record and must never be edited. Eliding is deprecation from view,`,
-		`not deletion.`,
-		``,
-		`How to work:`,
-		`1. Read the target .jsonl with your file tools. It is JSONL; each line is an`,
-		`   entry { id, parentId, timestamp, type, message }. The messages that enter`,
-		`   the LLM view are the type:"message" entries; each carries`,
-		`   message.timestamp (epoch ms).`,
-		`2. Discuss candidates with the human. Be specific about what stays and goes.`,
-		`   Revise freely — this is a conversation.`,
-		`3. When you agree, WRITE the sidecar as JSON of shape:`,
-		`     { "ops": [ { "op": "elide", "from": <ms>, "to": <ms>,`,
-		`                  "synopsis": "<one tight paragraph>" } ] }`,
-		`   Use message.timestamp values for from/to (inclusive window). The window`,
-		`   collapses to the synopsis in the target's view; everything in [from,to]`,
-		`   is hidden there but preserved on disk.`,
-		`   IMPORTANT: preserve the existing "metaSession" field if present — merge,`,
-		`   do not clobber it. Only ever touch "ops". Never edit the target .jsonl.`,
-		``,
-		`The human's opening request: ${task || "(none given — ask what they want to elide.)"}`,
-	].join("\n");
-}
+const ELIDE_TOOL = "elide_region";
 
 export default function (pi: ExtensionAPI) {
-	// ---- 3. The view-rewrite (runs in every session) ---------------------------
-	pi.on("context", async (event, ctx) => {
-		const sessionFile = ctx.sessionManager.getSessionFile();
-		if (!sessionFile) return undefined;
-		const sidecar = readSidecar(sessionFile);
-		if (!sidecar.ops || sidecar.ops.length === 0) return undefined; // no-op fast path
-		const rewritten = applyOps(event.messages as never[], sidecar.ops);
-		return { messages: rewritten as typeof event.messages };
+	// ---- Renderer (registered globally; only fires for meta-elided entries) ----
+	pi.registerMessageRenderer(ELIDED_TYPE, makeElidedRenderer() as never);
+
+	// ---- Tool-scoping guard: recompute active tools on EVERY session start -----
+	pi.on("session_start", async (_event, ctx) => {
+		const active = new Set(ctx.getActiveTools());
+		if (isMetaSession(ctx.sessionManager)) {
+			active.add(ELIDE_TOOL);
+		} else {
+			active.delete(ELIDE_TOOL); // authoritative strip — defeats carry-forward
+		}
+		ctx.setActiveTools([...active]);
 	});
 
-	// ---- 1. /meta : open or resume the linked meta session ---------------------
+	// ---- The meta-scoped elision tool ------------------------------------------
+	pi.registerTool({
+		name: ELIDE_TOOL,
+		label: "Elide region",
+		description:
+			"Elide a contiguous run of messages in the TARGET session into a single " +
+			"collapsed synopsis entry. Non-destructive (branches the append-only tree; " +
+			"verbatim is preserved). Identify the run by the first and last message " +
+			"entry `id` from the target's .jsonl.",
+		promptGuidelines: [
+			"Read the target session file to find message entry ids; confirm the region with the human before eliding.",
+		],
+		parameters: Type.Object({
+			fromId: Type.String({ description: "Entry id of the first message to elide (inclusive)." }),
+			toId: Type.String({ description: "Entry id of the last message to elide (inclusive)." }),
+			synopsis: Type.String({ description: "One-paragraph summary shown in place of the elided run." }),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			const target = targetOfMeta(ctx.sessionManager);
+			if (!target) {
+				return errorResult("elide_region must be called from a meta session (no parent/target found).");
+			}
+			const synopsis = params.synopsis?.trim();
+			if (!synopsis) {
+				return errorResult("synopsis must be a non-empty string.");
+			}
+			try {
+				const msg = openAndElide(target, { fromId: params.fromId, toId: params.toId, synopsis });
+				return okResult(msg);
+			} catch (err) {
+				return errorResult(err instanceof Error ? err.message : String(err));
+			}
+		},
+	});
+
+	// ---- /meta : open or resume the linked meta session ------------------------
 	pi.registerCommand("meta", {
-		description: "Open/resume a linked meta session to discuss & elide this session's view",
+		description: "Open/resume a linked meta session to discuss & elide this session",
 		handler: async (args, ctx) => {
-			const targetSession = ctx.sessionManager.getSessionFile();
-			if (!targetSession) {
+			const target = ctx.sessionManager.getSessionFile();
+			if (!target) {
 				ctx.ui?.notify?.("No session file for the current session.", "warning");
 				return;
 			}
-			const sidecar: MetaSidecar = readSidecar(targetSession);
-			const sidecarPath = `${targetSession}.meta.json`;
-
-			// Resume path: a meta session already exists -> just switch to it.
-			if (sidecar.metaSession) {
-				await ctx.switchSession(sidecar.metaSession);
+			const existing = await findMetaChild(ctx.cwd, target);
+			if (existing) {
+				await ctx.switchSession(existing);
 				return;
 			}
-
-			// Create path: spin up a child session linked back to this target.
 			await ctx.newSession({
-				parentSession: targetSession,
-				// setup runs with a full SessionManager BEFORE the session goes live:
-				// record the reverse link + persist the metaSession pointer on the target.
+				parentSession: target,
 				setup: async (sm) => {
-					sm.appendCustomEntry(META_TARGET, { targetSession } satisfies MetaTargetData);
-					const metaSession = sm.getSessionFile();
-					if (metaSession) patchSidecar(targetSession, { metaSession });
-					sm.appendSessionInfo(`meta: ${baseName(targetSession)}`);
+					sm.appendSessionInfo(metaSessionName(target));
 				},
-				// withSession runs with the fresh command ctx AFTER replacement:
-				// seed the meta-agent with its instructions and the human's task.
 				withSession: async (mctx) => {
-					await mctx.sendUserMessage(seedPrompt(targetSession, sidecarPath, args.trim()), {
-						deliverAs: "followUp",
-					});
+					await mctx.sendUserMessage(seedPrompt(target, args.trim()), { deliverAs: "followUp" });
 				},
 			});
 		},
 	});
 
-	// ---- 2. /back : return from a meta session to its target -------------------
+	// ---- /back : pure navigation back to the target ----------------------------
 	pi.registerCommand("back", {
 		description: "From a meta session, switch back to its target session",
 		handler: async (_args, ctx) => {
-			const branch = ctx.sessionManager.getBranch();
-			const link = branch.find(
-				(e) => e.type === "custom" && (e as { customType?: string }).customType === META_TARGET,
-			) as { data?: MetaTargetData } | undefined;
-			const targetSession = link?.data?.targetSession;
-			if (!targetSession) {
+			const target = targetOfMeta(ctx.sessionManager);
+			if (!target) {
 				ctx.ui?.notify?.("This is not a meta session (no target link found).", "warning");
 				return;
 			}
-			await ctx.switchSession(targetSession);
+			await ctx.switchSession(target);
 		},
 	});
 }
 
-/** Trailing path segment, for a readable session name. */
-function baseName(p: string): string {
-	const parts = p.split("/");
-	return parts[parts.length - 1] ?? p;
+function okResult(text: string) {
+	return { content: [{ type: "text" as const, text }], isError: false };
+}
+function errorResult(text: string) {
+	return { content: [{ type: "text" as const, text: `pi-meta: ${text}` }], isError: true };
 }
