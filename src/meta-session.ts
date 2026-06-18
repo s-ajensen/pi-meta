@@ -1,44 +1,29 @@
-/**
- * Meta-session identity & linking — all native, no sidecar.
- *
- * Links are carried by pi itself:
- *   - meta -> target : the meta session's header `parentSession` (set when we
- *     create it with newSession({ parentSession })).
- *   - target -> meta : found by scanning SessionManager.list(cwd) for a session
- *     whose `parentSessionPath` is the target AND whose name carries our marker.
- *
- * A meta session is identified by a POSITIVE marker (its session name prefix),
- * never by `parentSession` alone — a normal fork also has a parent, and we must
- * not arm the elide tool in a fork.
- */
-
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-/** Name prefix that marks a session as a pi-meta meta session. */
 export const META_NAME_PREFIX = "meta: ";
 
-/** Build the display name for the meta session of a given target. */
-export function metaSessionName(targetSessionFile: string): string {
-	return `${META_NAME_PREFIX}${baseName(targetSessionFile)}`;
-}
-
-/** Is the CURRENT session (via its manager) a pi-meta meta session?
- *  Positive check: the session name starts with our marker. Robust against forks. */
-export function isMetaSession(sm: {
+interface SessionManagerView {
 	getSessionName?: () => string | undefined;
 	getHeader?: () => { parentSession?: string } | null;
-}): boolean {
-	const name = sm.getSessionName?.();
+}
+
+export function buildMetaSessionName(targetSessionFile: string): string {
+	return `${META_NAME_PREFIX}${extractBaseName(targetSessionFile)}`;
+}
+
+export function isMetaSession(session: SessionManagerView): boolean {
+	const name = session.getSessionName?.();
 	return typeof name === "string" && name.startsWith(META_NAME_PREFIX);
 }
 
-/** The target this meta session belongs to (its parent), or undefined. */
-export function targetOfMeta(sm: { getHeader?: () => { parentSession?: string } | null }): string | undefined {
-	return sm.getHeader?.()?.parentSession;
+export function resolveMetaTarget(session: SessionManagerView): string | undefined {
+	return session.getHeader?.()?.parentSession;
 }
 
-/** Find an existing meta child of `targetSessionFile` for this cwd, if any.
- *  Returns the meta session's file path, or undefined. */
+function stripTrailingSlash(path?: string): string | undefined {
+	return path ? path.replace(/\/+$/, "") : path;
+}
+
 export async function findMetaChild(cwd: string, targetSessionFile: string): Promise<string | undefined> {
 	let sessions;
 	try {
@@ -46,18 +31,15 @@ export async function findMetaChild(cwd: string, targetSessionFile: string): Pro
 	} catch {
 		return undefined;
 	}
-	const canon = (p?: string) => (p ? p.replace(/\/+$/, "") : p);
-	const target = canon(targetSessionFile);
-	for (const s of sessions) {
-		if (canon(s.parentSessionPath) === target && typeof s.name === "string" && s.name.startsWith(META_NAME_PREFIX)) {
-			return s.path;
-		}
-	}
-	return undefined;
+	const target = stripTrailingSlash(targetSessionFile);
+	const isMetaChildOfTarget = (candidate: { parentSessionPath?: string; name?: string }) =>
+		stripTrailingSlash(candidate.parentSessionPath) === target &&
+		typeof candidate.name === "string" &&
+		candidate.name.startsWith(META_NAME_PREFIX);
+	return sessions.find(isMetaChildOfTarget)?.path;
 }
 
-/** Seed prompt planted into a freshly-created meta session. */
-export function seedPrompt(targetSession: string, task: string): string {
+export function buildSeedPrompt(targetSession: string, task: string): string {
 	return [
 		`You are the META thread for another pi session (the "target").`,
 		``,
@@ -95,7 +77,7 @@ export function seedPrompt(targetSession: string, task: string): string {
 	].join("\n");
 }
 
-function baseName(p: string): string {
-	const parts = p.split("/");
-	return parts[parts.length - 1] ?? p;
+function extractBaseName(path: string): string {
+	const segments = path.split("/");
+	return segments[segments.length - 1] ?? path;
 }
