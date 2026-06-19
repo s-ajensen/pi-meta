@@ -21,6 +21,7 @@ interface MessageEntry {
 
 export interface SessionLike {
 	getEntries(): MessageEntry[];
+	getBranch(fromId?: string): MessageEntry[];
 	getLeafId(): string | null;
 	branch(branchFromId: string): void;
 	appendCustomMessageEntry(
@@ -45,7 +46,7 @@ interface ResolvedRegion {
 }
 
 function resolveRegion(session: SessionLike, region: ElideRegion): ResolvedRegion {
-	const entries = session.getEntries();
+	const entries = session.getBranch(session.getLeafId() ?? undefined);
 	const messages = entries.filter((e) => e.type === "message");
 	const fromIdx = messages.findIndex((e) => e.id === region.fromId);
 	const toIdx = messages.findIndex((e) => e.id === region.toId);
