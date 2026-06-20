@@ -1,19 +1,19 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ELIDED_TYPE, openAndElide } from "./ops.ts";
+import { ELIDED_TYPE, elideRegions } from "./ops.ts";
 import { makeElidedRenderer } from "./render.ts";
 import { isMetaSession, resolveMetaTarget, findMetaChild, buildMetaSessionName, buildSeedPrompt } from "./meta-session.ts";
 
-const ELIDE_TOOL = "elide_region";
+const ELIDE_TOOL = "elide_regions";
 
-type ToolResult = { content: { type: "text"; text: string }[]; isError: boolean };
+type ToolResult = { content: { type: "text"; text: string }[]; isError: boolean; details: undefined };
 
 function buildOkResult(text: string): ToolResult {
-	return { content: [{ type: "text", text }], isError: false };
+	return { content: [{ type: "text", text }], isError: false, details: undefined };
 }
 
 function buildErrorResult(text: string): ToolResult {
-	return { content: [{ type: "text", text: `pi-meta: ${text}` }], isError: true };
+	return { content: [{ type: "text", text: `pi-meta: ${text}` }], isError: true, details: undefined };
 }
 
 function scopeToolToMetaSessions(pi: ExtensionAPI) {
@@ -31,29 +31,38 @@ function scopeToolToMetaSessions(pi: ExtensionAPI) {
 function registerElideTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: ELIDE_TOOL,
-		label: "Elide region",
+		label: "Elide regions",
 		description:
-			"Elide a contiguous run of messages in the TARGET session into a single " +
-			"collapsed synopsis entry. Non-destructive (branches the append-only tree; " +
-			"verbatim is preserved). Identify the run by the first and last message " +
-			"entry `id` from the target's .jsonl.",
+			"Elide one or more contiguous runs of messages in the TARGET session, each " +
+			"into a single collapsed synopsis entry, in one pass. Non-destructive " +
+			"(branches the append-only tree; verbatim is preserved). Identify each run by " +
+			"the first and last message entry `id` from the target's .jsonl. Resolve all " +
+			"ids from a single fresh read; regions must not overlap.",
 		promptGuidelines: [
-			"Read the target session file to find message entry ids; confirm the region with the human before eliding.",
+			"Read the target session file once, then pass every region you want elided in a single call; do not precompute ids across separate calls.",
+			"Confirm the regions with the human before eliding.",
 		],
 		parameters: Type.Object({
-			fromId: Type.String({ description: "Entry id of the first message to elide (inclusive)." }),
-			toId: Type.String({ description: "Entry id of the last message to elide (inclusive)." }),
-			synopsis: Type.String({ description: "One-paragraph summary shown in place of the elided run." }),
+			regions: Type.Array(
+				Type.Object({
+					fromId: Type.String({ description: "Entry id of the first message to elide (inclusive)." }),
+					toId: Type.String({ description: "Entry id of the last message to elide (inclusive)." }),
+					synopsis: Type.String({ description: "One-paragraph summary shown in place of this run." }),
+				}),
+				{ description: "The runs to elide, each identified by first/last message id." },
+			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const target = resolveMetaTarget(ctx.sessionManager);
-			if (!target) return buildErrorResult("elide_region must be called from a meta session (no parent/target found).");
+			if (!target) return buildErrorResult("elide_regions must be called from a meta session (no parent/target found).");
 
-			const synopsis = params.synopsis?.trim();
-			if (!synopsis) return buildErrorResult("synopsis must be a non-empty string.");
+			const regions = params.regions.map((region) => ({ ...region, synopsis: region.synopsis?.trim() }));
+			if (regions.some((region) => !region.synopsis)) {
+				return buildErrorResult("every region needs a non-empty synopsis.");
+			}
 
 			try {
-				return buildOkResult(openAndElide(target, { fromId: params.fromId, toId: params.toId, synopsis }));
+				return buildOkResult(elideRegions(target, regions));
 			} catch (err) {
 				return buildErrorResult(err instanceof Error ? err.message : String(err));
 			}

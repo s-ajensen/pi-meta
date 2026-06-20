@@ -1,4 +1,5 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { planElisions, type BranchMessage, type ElideRegion, type PlanStep } from "./plan.ts";
 
 export const ELIDED_TYPE = "meta-elided";
 
@@ -13,15 +14,8 @@ export interface ElidedDetails {
 	verbatim: ElidedMessage[];
 }
 
-interface MessageEntry {
-	id: string;
-	type: string;
-	message?: { role: string; content: unknown };
-}
-
 export interface SessionLike {
-	getEntries(): MessageEntry[];
-	getBranch(fromId?: string): MessageEntry[];
+	getBranch(fromId?: string): BranchMessage[];
 	getLeafId(): string | null;
 	branch(branchFromId: string): void;
 	appendCustomMessageEntry(
@@ -33,69 +27,38 @@ export interface SessionLike {
 	appendMessage(message: unknown): string;
 }
 
-export interface ElideRegion {
-	fromId: string;
-	toId: string;
-	synopsis: string;
-}
-
-interface ResolvedRegion {
-	branchPointId: string | undefined;
-	elided: MessageEntry[];
-	survivors: MessageEntry[];
-}
-
-function resolveRegion(session: SessionLike, region: ElideRegion): ResolvedRegion {
-	const entries = session.getBranch(session.getLeafId() ?? undefined);
-	const messages = entries.filter((e) => e.type === "message");
-	const fromIdx = messages.findIndex((e) => e.id === region.fromId);
-	const toIdx = messages.findIndex((e) => e.id === region.toId);
-
-	if (fromIdx === -1 || toIdx === -1) {
-		throw new Error(`could not resolve elide region [${region.fromId}..${region.toId}]`);
-	}
-	if (toIdx < fromIdx) {
-		throw new Error("elide region toId precedes fromId");
-	}
-
-	return {
-		branchPointId: findBranchPointBefore(entries, messages, fromIdx),
-		elided: messages.slice(fromIdx, toIdx + 1),
-		survivors: messages.slice(toIdx + 1),
-	};
-}
-
-function findBranchPointBefore(entries: MessageEntry[], messages: MessageEntry[], fromIdx: number): string | undefined {
-	if (fromIdx > 0) return messages[fromIdx - 1].id;
-	const firstMessageIdx = entries.findIndex((e) => e.id === messages[fromIdx].id);
-	return firstMessageIdx > 0 ? entries[firstMessageIdx - 1].id : undefined;
-}
-
-function buildElidedDetails(elided: MessageEntry[]): ElidedDetails {
+function toElidedDetails(elided: BranchMessage[]): ElidedDetails {
 	return {
 		op: "elided",
 		count: elided.length,
-		verbatim: elided.map((e) => ({
-			role: e.message?.role ?? "unknown",
-			content: e.message?.content ?? null,
+		verbatim: elided.map((entry) => ({
+			role: entry.message?.role ?? "unknown",
+			content: entry.message?.content ?? null,
 		})),
 	};
 }
 
-export function applyElision(session: SessionLike, region: ElideRegion): string {
-	const { branchPointId, elided, survivors } = resolveRegion(session, region);
-
-	if (branchPointId) session.branch(branchPointId);
-
-	const elidedId = session.appendCustomMessageEntry(ELIDED_TYPE, region.synopsis, true, buildElidedDetails(elided));
-	for (const survivor of survivors) {
-		session.appendMessage(survivor.message);
+function executeStep(session: SessionLike, step: PlanStep): void {
+	if (step.kind === "elide") {
+		session.appendCustomMessageEntry(ELIDED_TYPE, step.synopsis, true, toElidedDetails(step.elided));
+	} else {
+		session.appendMessage(step.message.message);
 	}
-	return elidedId;
 }
 
-export function openAndElide(targetPath: string, region: ElideRegion): string {
+export function applyElisions(session: SessionLike, regions: ElideRegion[]): void {
+	const branch = session.getBranch(session.getLeafId() ?? undefined);
+	const plan = planElisions(branch, regions);
+
+	if (plan.branchPointId) session.branch(plan.branchPointId);
+	for (const step of plan.tail) {
+		executeStep(session, step);
+	}
+}
+
+export function elideRegions(targetPath: string, regions: ElideRegion[]): string {
 	const target = SessionManager.open(targetPath) as unknown as SessionLike;
-	applyElision(target, region);
-	return `Elided region [${region.fromId}..${region.toId}] in target. Verbatim preserved on the prior branch.`;
+	applyElisions(target, regions);
+	const count = regions.length;
+	return `Elided ${count} ${count === 1 ? "region" : "regions"} in target. Verbatim preserved on the prior branch.`;
 }
