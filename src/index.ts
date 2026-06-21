@@ -1,30 +1,17 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ELIDED_TYPE, elideRegions } from "./ops.ts";
+import { ELIDED_TYPE, runElideTool } from "./ops.ts";
 import { makeElidedRenderer } from "./render.ts";
-import { isMetaSession, resolveMetaTarget, findMetaChild, buildMetaSessionName, buildSeedPrompt } from "./meta-session.ts";
+import { isMetaSession } from "./meta-session.ts";
+import { reconcileToolActivation } from "./tool-activation.ts";
+import { runMetaCommand, runBackCommand } from "./commands.ts";
 
 const ELIDE_TOOL = "elide_regions";
 
-type ToolResult = { content: { type: "text"; text: string }[]; isError: boolean; details: undefined };
-
-function buildOkResult(text: string): ToolResult {
-	return { content: [{ type: "text", text }], isError: false, details: undefined };
-}
-
-function buildErrorResult(text: string): ToolResult {
-	return { content: [{ type: "text", text: `pi-meta: ${text}` }], isError: true, details: undefined };
-}
-
 function scopeToolToMetaSessions(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
-		const active = new Set(pi.getActiveTools());
-		if (isMetaSession(ctx.sessionManager)) {
-			active.add(ELIDE_TOOL);
-		} else {
-			active.delete(ELIDE_TOOL);
-		}
-		pi.setActiveTools([...active]);
+		const isMeta = isMetaSession(ctx.sessionManager);
+		pi.setActiveTools(reconcileToolActivation(pi.getActiveTools(), isMeta, ELIDE_TOOL));
 	});
 }
 
@@ -33,14 +20,10 @@ function registerElideTool(pi: ExtensionAPI) {
 		name: ELIDE_TOOL,
 		label: "Elide regions",
 		description:
-			"Elide one or more contiguous runs of messages in the TARGET session, each " +
-			"into a single collapsed synopsis entry, in one pass. Non-destructive " +
-			"(branches the append-only tree; verbatim is preserved). Identify each run by " +
-			"the first and last message entry `id` from the target's .jsonl. Resolve all " +
-			"ids from a single fresh read; regions must not overlap.",
+			"Collapse one or more contiguous runs of messages in the target session into " +
+			"synopsis entries (non-destructive). See the `elision` skill for how to do it well.",
 		promptGuidelines: [
-			"Read the target session file once, then pass every region you want elided in a single call; do not precompute ids across separate calls.",
-			"Confirm the regions with the human before eliding.",
+			"Resolve every fromId/toId from a single fresh read of the target, and pass all regions in ONE call; ids from a stale read will not resolve after the first elision. Regions must not overlap.",
 		],
 		parameters: Type.Object({
 			regions: Type.Array(
@@ -52,64 +35,7 @@ function registerElideTool(pi: ExtensionAPI) {
 				{ description: "The runs to elide, each identified by first/last message id." },
 			),
 		}),
-		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			const target = resolveMetaTarget(ctx.sessionManager);
-			if (!target) return buildErrorResult("elide_regions must be called from a meta session (no parent/target found).");
-
-			const regions = params.regions.map((region) => ({ ...region, synopsis: region.synopsis?.trim() }));
-			if (regions.some((region) => !region.synopsis)) {
-				return buildErrorResult("every region needs a non-empty synopsis.");
-			}
-
-			try {
-				return buildOkResult(elideRegions(target, regions));
-			} catch (err) {
-				return buildErrorResult(err instanceof Error ? err.message : String(err));
-			}
-		},
-	});
-}
-
-function registerMetaCommand(pi: ExtensionAPI) {
-	pi.registerCommand("meta", {
-		description: "Open/resume a linked meta session to discuss & elide this session",
-		handler: async (args, ctx) => {
-			const target = ctx.sessionManager.getSessionFile();
-			if (!target) {
-				ctx.ui?.notify?.("No session file for the current session.", "warning");
-				return;
-			}
-
-			const existing = await findMetaChild(ctx.cwd, target);
-			if (existing) {
-				await ctx.switchSession(existing);
-				return;
-			}
-
-			await ctx.newSession({
-				parentSession: target,
-				setup: async (sessionManager) => {
-					sessionManager.appendSessionInfo(buildMetaSessionName(target));
-				},
-				withSession: async (metaContext) => {
-					await metaContext.sendUserMessage(buildSeedPrompt(target, args.trim()), { deliverAs: "followUp" });
-				},
-			});
-		},
-	});
-}
-
-function registerBackCommand(pi: ExtensionAPI) {
-	pi.registerCommand("back", {
-		description: "From a meta session, switch back to its target session",
-		handler: async (_args, ctx) => {
-			const target = resolveMetaTarget(ctx.sessionManager);
-			if (!target) {
-				ctx.ui?.notify?.("This is not a meta session (no target link found).", "warning");
-				return;
-			}
-			await ctx.switchSession(target);
-		},
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => runElideTool(params, ctx),
 	});
 }
 
@@ -117,6 +43,12 @@ export default function (pi: ExtensionAPI) {
 	pi.registerMessageRenderer(ELIDED_TYPE, makeElidedRenderer() as never);
 	scopeToolToMetaSessions(pi);
 	registerElideTool(pi);
-	registerMetaCommand(pi);
-	registerBackCommand(pi);
+	pi.registerCommand("meta", {
+		description: "Open/resume a linked meta session to discuss & elide this session",
+		handler: runMetaCommand as never,
+	});
+	pi.registerCommand("back", {
+		description: "From a meta session, switch back to its target session",
+		handler: runBackCommand as never,
+	});
 }

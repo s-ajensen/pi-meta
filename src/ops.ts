@@ -1,5 +1,6 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { planElisions, type BranchMessage, type ElideRegion, type PlanStep } from "./plan.ts";
+import { resolveMetaTarget } from "./meta-session.ts";
 
 export const ELIDED_TYPE = "meta-elided";
 
@@ -61,4 +62,34 @@ export function elideRegions(targetPath: string, regions: ElideRegion[]): string
 	applyElisions(target, regions);
 	const count = regions.length;
 	return `Elided ${count} ${count === 1 ? "region" : "regions"} in target. Verbatim preserved on the prior branch.`;
+}
+
+export interface ToolResult {
+	content: { type: "text"; text: string }[];
+	isError: boolean;
+	details: undefined;
+}
+
+function okResult(text: string): ToolResult {
+	return { content: [{ type: "text", text }], isError: false, details: undefined };
+}
+
+function errorResult(text: string): ToolResult {
+	return { content: [{ type: "text", text: `pi-meta: ${text}` }], isError: true, details: undefined };
+}
+
+interface ElideToolContext {
+	sessionManager: { getHeader?: () => { parentSession?: string } | null };
+}
+
+export function runElideTool(params: { regions: ElideRegion[] }, ctx: ElideToolContext): ToolResult {
+	const target = resolveMetaTarget(ctx.sessionManager);
+	if (!target) {
+		return errorResult("elide_regions must be called from a meta session (no parent/target found).");
+	}
+	try {
+		return okResult(elideRegions(target, params.regions));
+	} catch (err) {
+		return errorResult(err instanceof Error ? err.message : String(err));
+	}
 }

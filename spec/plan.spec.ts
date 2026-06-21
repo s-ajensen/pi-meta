@@ -10,6 +10,13 @@ test("eliding no regions is rejected", () => {
 	expect(() => planElisions(branch, [])).toThrow("no regions");
 });
 
+test("a region with a blank synopsis is rejected", () => {
+	const branch = messages("m0", "m1", "m2");
+	expect(() => planElisions(branch, [{ fromId: "m1", toId: "m2", synopsis: "   " }])).toThrow(
+		"synopsis",
+	);
+});
+
 test("an unresolvable anchor rejects the whole plan", () => {
 	const branch = messages("m0", "m1", "m2");
 	expect(() => planElisions(branch, [{ fromId: "m1", toId: "ghost", synopsis: "S" }])).toThrow(

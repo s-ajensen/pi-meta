@@ -1,4 +1,5 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { capabilities, renderMetaSkills } from "./capabilities.ts";
 
 export const META_NAME_PREFIX = "meta: ";
 
@@ -13,68 +14,66 @@ export function buildMetaSessionName(targetSessionFile: string): string {
 
 export function isMetaSession(session: SessionManagerView): boolean {
 	const name = session.getSessionName?.();
-	return typeof name === "string" && name.startsWith(META_NAME_PREFIX);
+	const hasMarker = typeof name === "string" && name.startsWith(META_NAME_PREFIX);
+	return hasMarker && resolveMetaTarget(session) !== undefined;
 }
 
 export function resolveMetaTarget(session: SessionManagerView): string | undefined {
 	return session.getHeader?.()?.parentSession;
 }
 
+export interface SessionCandidate {
+	path: string;
+	parentSessionPath?: string;
+	name?: string;
+}
+
 function stripTrailingSlash(path?: string): string | undefined {
 	return path ? path.replace(/\/+$/, "") : path;
 }
 
-export async function findMetaChild(cwd: string, targetSessionFile: string): Promise<string | undefined> {
-	let sessions;
-	try {
-		sessions = await SessionManager.list(cwd);
-	} catch {
-		return undefined;
-	}
+export function selectMetaChild(candidates: SessionCandidate[], targetSessionFile: string): string | undefined {
 	const target = stripTrailingSlash(targetSessionFile);
-	const isMetaChildOfTarget = (candidate: { parentSessionPath?: string; name?: string }) =>
+	const isMetaChildOfTarget = (candidate: SessionCandidate) =>
 		stripTrailingSlash(candidate.parentSessionPath) === target &&
 		typeof candidate.name === "string" &&
 		candidate.name.startsWith(META_NAME_PREFIX);
-	return sessions.find(isMetaChildOfTarget)?.path;
+	return candidates.find(isMetaChildOfTarget)?.path;
 }
 
-export function buildSeedPrompt(targetSession: string, task: string): string {
-	return [
-		`You are the META thread for another pi session (the "target").`,
+export async function findMetaChild(cwd: string, targetSessionFile: string): Promise<string | undefined> {
+	try {
+		return selectMetaChild(await SessionManager.list(cwd), targetSessionFile);
+	} catch {
+		return undefined;
+	}
+}
+
+export function buildSeedPrompt(targetSession: string): string {
+	const lines = [
+		`You are a META thread paired with another pi session (the "target").`,
 		``,
 		`Target session log (read-only to you): ${targetSession}`,
 		``,
-		`Your job: help the human decide what to ELIDE from the target — to collapse`,
-		`spent runs of messages into a short synopsis. Eliding is non-destructive: it`,
-		`branches the session tree (append-only), so the verbatim messages are`,
-		`preserved and the on-disk record is never overwritten. On resume, the target's`,
-		`model sees the synopsis in place of the run; the human sees a collapsed banner`,
-		`that expands to the greyed verbatim.`,
+		`Your purpose: reason about the target conversation on the human's behalf, in a`,
+		`separate thread, so the target agent's context stays clean. You think about the`,
+		`conversation; you never pollute it.`,
 		``,
-		`How to work:`,
-		`1. Read the target .jsonl with your file tools. Each line is an entry`,
-		`   { id, parentId, timestamp, type, message }. The turns are type:"message"`,
-		`   entries; each has a stable "id".`,
-		`2. Discuss candidate regions with the human. Be specific about what stays and`,
-		`   goes. Confirm before acting.`,
-		`3. To elide a contiguous run, call the elide_region tool with the FIRST and`,
-		`   LAST message entry "id" of the run and a one-paragraph synopsis. The tool`,
-		`   applies the elision directly to the target file; you do NOT edit the .jsonl`,
-		`   yourself. The human returns to the target with /back (pure navigation — the`,
-		`   elision is already applied).`,
+		`The target is a JSONL session log — each line is an entry`,
+		`{ id, parentId, timestamp, type, message }. Read it with your file tools to`,
+		`ground whatever the human asks.`,
 		``,
-		`Synopsis formatting: the synopsis renders as MARKDOWN in the collapsed banner,`,
-		`so make it scannable, not a wall of text. Prefer a one-line bold gist followed`,
-		`by a short bullet list of the key points/decisions — a few bullets, not`,
-		`paragraphs. Example:`,
-		`   **Reworked elision to a branch-based model.**`,
-		`   - tool opens the target via the SDK and writes through directly`,
-		`   - /back is pure navigation; no payload travels`,
-		`   - verbatim preserved on the sibling branch`,
+		`People use this channel for many things — for example:`,
+		`  - mine the conversation for insights or notable moments`,
+		`  - surface improvements to the pi harness from what happened in the target`,
+		`  - extract a principle, decision, or artifact worth preserving`,
+		`  - collapse spent stretches of the target into summaries to declutter it`,
+		`...among much else. Wait for the human to tell you what they want to explore.`,
 		``,
-		`The human's opening request: ${task || "(none — ask what they want to elide.)"}`,
-	].join("\n");
+		`When the work is done, the human returns to the target with /back.`,
+	];
+	const skills = renderMetaSkills(capabilities);
+	return skills ? `${lines.join("\n")}\n\n${skills}` : lines.join("\n");
 }
 
 function extractBaseName(path: string): string {

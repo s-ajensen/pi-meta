@@ -26,6 +26,10 @@ interface ResolvedRegion {
 }
 
 function resolveRegion(messages: BranchMessage[], region: ElideRegion): ResolvedRegion {
+	const synopsis = region.synopsis.trim();
+	if (!synopsis) {
+		throw new Error(`elide region [${region.fromId}..${region.toId}] needs a non-empty synopsis`);
+	}
 	const fromIdx = messages.findIndex((entry) => entry.id === region.fromId);
 	const toIdx = messages.findIndex((entry) => entry.id === region.toId);
 	if (fromIdx === -1 || toIdx === -1) {
@@ -34,7 +38,7 @@ function resolveRegion(messages: BranchMessage[], region: ElideRegion): Resolved
 	if (toIdx < fromIdx) {
 		throw new Error(`elide region toId precedes fromId [${region.fromId}..${region.toId}]`);
 	}
-	return { fromIdx, toIdx, synopsis: region.synopsis };
+	return { fromIdx, toIdx, synopsis };
 }
 
 function orderByPosition(regions: ResolvedRegion[]): ResolvedRegion[] {

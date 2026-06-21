@@ -5,7 +5,7 @@
   "pi": {
     "extensions": ["./index.ts"]
   },
-  "files": ["index.ts", "src/**/*.ts", "README.md"],
+  "files": ["index.ts", "src/**/*.ts", "src/**/*.md", "README.md"],
   "keywords": ["pi-package"],
   "license": "MIT",
   "scripts": {

@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { applyElisions, ELIDED_TYPE, type SessionLike } from "../src/ops.ts";
+import { applyElisions, runElideTool, ELIDED_TYPE, type SessionLike } from "../src/ops.ts";
 
 function buildSession(messageCount: number): SessionManager {
 	const manager = SessionManager.inMemory();
@@ -71,4 +71,10 @@ test("serial elisions over a growing session stay bounded, not exponential", () 
 	}
 
 	expect(activeMessages(manager).length).toBeLessThan(40);
+});
+
+test("runElideTool reports an error when not called from a meta session", () => {
+	const result = runElideTool({ regions: [] }, { sessionManager: { getHeader: () => ({}) } });
+	expect(result.isError).toBe(true);
+	expect(result.content[0].text).toContain("meta session");
 });

@@ -6,7 +6,7 @@ const GLYPH = "⌁";
 
 type ContentBlock = { type?: string; text?: string; name?: string; arguments?: unknown };
 
-function truncateArgs(args: unknown): string {
+export function truncateArgs(args: unknown): string {
 	try {
 		const serialized = JSON.stringify(args ?? {});
 		return serialized.length > 80 ? `${serialized.slice(0, 77)}…` : serialized;
@@ -15,7 +15,7 @@ function truncateArgs(args: unknown): string {
 	}
 }
 
-function renderBlockText(block: ContentBlock): string | undefined {
+export function renderBlockText(block: ContentBlock): string | undefined {
 	if (block.type === "text" && typeof block.text === "string") return block.text;
 	if (block.type === "toolCall") return `→ ${block.name ?? "tool"}(${truncateArgs(block.arguments)})`;
 	if (block.type === "thinking") return "(thinking)";
@@ -23,7 +23,7 @@ function renderBlockText(block: ContentBlock): string | undefined {
 	return undefined;
 }
 
-function flattenContent(content: unknown): string {
+export function flattenContent(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
@@ -33,7 +33,7 @@ function flattenContent(content: unknown): string {
 		.join("\n");
 }
 
-function buildMarkerText(count: number, expanded: boolean): string {
+export function buildMarkerText(count: number, expanded: boolean): string {
 	if (count <= 1) return `${GLYPH} [1 message elided]`;
 	return `${GLYPH} [${count} messages elided ${expanded ? "▲" : "▼"}]`;
 }
