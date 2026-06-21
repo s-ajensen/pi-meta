@@ -5,6 +5,35 @@ function messages(...ids: string[]) {
 	return ids.map((id) => ({ id, type: "message", message: { role: "user", content: id } }));
 }
 
+function toolCall(id: string, callId: string) {
+	return { id, type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: callId }] } };
+}
+
+function toolResult(id: string, callId: string) {
+	return { id, type: "message", message: { role: "toolResult", toolCallId: callId, content: [] } };
+}
+
+test("a region that orphans a tool_result (its call is outside) is rejected", () => {
+	const branch = [messages("m0")[0], toolCall("m1", "c1"), toolResult("m2", "c1"), messages("m3")[0]];
+	expect(() => planElisions(branch, [{ fromId: "m2", toId: "m3", synopsis: "S" }])).toThrow(
+		"tool",
+	);
+});
+
+test("a region that orphans a tool_call (its result is outside) is rejected", () => {
+	const branch = [messages("m0")[0], toolCall("m1", "c1"), toolResult("m2", "c1"), messages("m3")[0]];
+	expect(() => planElisions(branch, [{ fromId: "m0", toId: "m1", synopsis: "S" }])).toThrow(
+		"tool",
+	);
+});
+
+test("a region that contains a whole tool call/result pair is allowed", () => {
+	const branch = [messages("m0")[0], toolCall("m1", "c1"), toolResult("m2", "c1"), messages("m3")[0]];
+	const plan = planElisions(branch, [{ fromId: "m1", toId: "m2", synopsis: "S" }]);
+	expect(plan.branchPointId).toBe("m0");
+	expect(plan.tail.filter((step) => step.kind === "elide")).toHaveLength(1);
+});
+
 test("eliding no regions is rejected", () => {
 	const branch = messages("m0", "m1");
 	expect(() => planElisions(branch, [])).toThrow("no regions");

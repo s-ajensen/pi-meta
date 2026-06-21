@@ -1,7 +1,7 @@
 export interface BranchMessage {
 	id: string;
 	type: string;
-	message?: { role: string; content: unknown };
+	message?: { role: string; content: unknown; toolCallId?: string };
 }
 
 export interface ElideRegion {
@@ -53,9 +53,43 @@ function rejectOverlaps(ordered: ResolvedRegion[]): void {
 	}
 }
 
+function callIdsIn(message: BranchMessage["message"]): string[] {
+	if (!Array.isArray(message?.content)) return [];
+	return message.content
+		.filter((block): block is { type: string; id: string } => {
+			return !!block && typeof block === "object" && (block as { type?: string }).type === "toolCall";
+		})
+		.map((block) => block.id);
+}
+
+function elidedIndexFor(messageIdx: number, regions: ResolvedRegion[]): number | undefined {
+	const region = regions.find((candidate) => messageIdx >= candidate.fromIdx && messageIdx <= candidate.toIdx);
+	return region ? region.fromIdx : undefined;
+}
+
+function rejectSeveredToolPairs(messages: BranchMessage[], regions: ResolvedRegion[]): void {
+	const callRegion = new Map<string, number | undefined>();
+	messages.forEach((entry, idx) => {
+		for (const callId of callIdsIn(entry.message)) {
+			callRegion.set(callId, elidedIndexFor(idx, regions));
+		}
+	});
+
+	messages.forEach((entry, idx) => {
+		const answeredCallId = entry.message?.toolCallId;
+		if (!answeredCallId || !callRegion.has(answeredCallId)) return;
+		if (callRegion.get(answeredCallId) !== elidedIndexFor(idx, regions)) {
+			throw new Error(
+				`elide region boundary severs a tool call from its result (${answeredCallId}); widen the region to include both`,
+			);
+		}
+	});
+}
+
 function resolveRegions(messages: BranchMessage[], regions: ElideRegion[]): ResolvedRegion[] {
 	const ordered = orderByPosition(regions.map((region) => resolveRegion(messages, region)));
 	rejectOverlaps(ordered);
+	rejectSeveredToolPairs(messages, ordered);
 	return ordered;
 }
 
