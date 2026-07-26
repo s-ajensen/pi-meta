@@ -1,34 +1,36 @@
 import { test, expect } from "bun:test";
 import { reconcileToolActivation } from "../src/tool-activation.ts";
 
-const TOOL = "elide_regions";
+const TOOLS = ["elide_regions", "apply_tags", "move_region"];
 
-test("arms the tool in a meta session", () => {
-	expect(reconcileToolActivation(["read", "bash"], true, TOOL)).toContain(TOOL);
+test("arms every meta tool in a meta session", () => {
+	const result = reconcileToolActivation(["read", "bash"], true, TOOLS);
+	for (const tool of TOOLS) expect(result).toContain(tool);
 });
 
-test("strips the tool in a non-meta session", () => {
-	expect(reconcileToolActivation(["read", "bash", TOOL], false, TOOL)).not.toContain(TOOL);
+test("strips every meta tool in a non-meta session", () => {
+	const carriedForward = ["read", "bash", ...TOOLS];
+	const result = reconcileToolActivation(carriedForward, false, TOOLS);
+	for (const tool of TOOLS) expect(result).not.toContain(tool);
 });
 
-test("strips a tool carried forward from a prior meta session", () => {
-	const carriedForward = ["read", "bash", TOOL];
-	expect(reconcileToolActivation(carriedForward, false, TOOL)).toEqual(["read", "bash"]);
+test("stripping in a non-meta session leaves only the unrelated tools", () => {
+	expect(reconcileToolActivation(["read", "bash", ...TOOLS], false, TOOLS)).toEqual(["read", "bash"]);
 });
 
-test("arming is idempotent when the tool is already active", () => {
-	expect(reconcileToolActivation(["read", TOOL], true, TOOL)).toEqual(["read", TOOL]);
+test("arming is idempotent when the tools are already active", () => {
+	expect(reconcileToolActivation(["read", ...TOOLS], true, TOOLS)).toEqual(["read", ...TOOLS]);
 });
 
-test("stripping is idempotent when the tool is already absent", () => {
-	expect(reconcileToolActivation(["read"], false, TOOL)).toEqual(["read"]);
+test("stripping is idempotent when the tools are already absent", () => {
+	expect(reconcileToolActivation(["read"], false, TOOLS)).toEqual(["read"]);
 });
 
-test("leaves unrelated tools untouched", () => {
-	expect(reconcileToolActivation(["read", "bash", "write"], true, TOOL)).toEqual([
+test("leaves unrelated tools untouched while arming", () => {
+	expect(reconcileToolActivation(["read", "bash", "write"], true, TOOLS)).toEqual([
 		"read",
 		"bash",
 		"write",
-		TOOL,
+		...TOOLS,
 	]);
 });

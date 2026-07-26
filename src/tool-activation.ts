@@ -1,5 +1,5 @@
-export function reconcileToolActivation(activeTools: string[], isMeta: boolean, tool: string): string[] {
-	const next = activeTools.filter((name) => name !== tool);
-	if (isMeta) next.push(tool);
+export function reconcileToolActivation(activeTools: string[], isMeta: boolean, tools: string[]): string[] {
+	const next = activeTools.filter((name) => !tools.includes(name));
+	if (isMeta) next.push(...tools);
 	return next;
 }

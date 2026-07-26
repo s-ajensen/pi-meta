@@ -60,6 +60,18 @@ test("the elision entry carries the verbatim of the messages it replaced", () =>
 	expect(elision.details?.verbatim).toHaveLength(2);
 });
 
+test("a region starting at the first message replaces it rather than duplicating the tail", () => {
+	const manager = buildSession(4);
+	const original = activeMessages(manager);
+
+	applyElisions(manager as unknown as SessionLike, [
+		{ fromId: original[0].id, toId: original[0].id, synopsis: "S" },
+	]);
+
+	expect(activeMessages(manager)).toHaveLength(3);
+	expect(activeElisions(manager)).toHaveLength(1);
+});
+
 test("serial elisions over a growing session stay bounded, not exponential", () => {
 	const manager = buildSession(40);
 

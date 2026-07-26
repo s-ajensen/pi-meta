@@ -13,6 +13,8 @@ type ToolExecute = (
 type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
 
 export interface LoadedExtension {
+	appendedEntries: { customType: string; data: unknown }[];
+	onAppendEntry(handler: (customType: string, data: unknown) => void): void;
 	commandHandler(name: string): CommandHandler;
 	toolExecute(name: string): ToolExecute;
 	eventHandler(event: string): EventHandler;
@@ -37,6 +39,13 @@ export async function loadPiMeta(): Promise<LoadedExtension> {
 		state.activeTools = tools;
 	};
 
+	const appendedEntries: { customType: string; data: unknown }[] = [];
+	let appendHandler: ((customType: string, data: unknown) => void) | undefined;
+	result.runtime.appendEntry = ((customType: string, data: unknown) => {
+		appendedEntries.push({ customType, data });
+		appendHandler?.(customType, data);
+	}) as never;
+
 	const firstHandler = (event: string): EventHandler => {
 		const handlers = extension.handlers.get(event);
 		if (!handlers?.length) throw new Error(`no handler for ${event}`);
@@ -44,6 +53,10 @@ export async function loadPiMeta(): Promise<LoadedExtension> {
 	};
 
 	return {
+		appendedEntries,
+		onAppendEntry: (handler) => {
+			appendHandler = handler;
+		},
 		commandHandler: (name) => {
 			const command = extension.commands.get(name);
 			if (!command) throw new Error(`command ${name} not registered`);

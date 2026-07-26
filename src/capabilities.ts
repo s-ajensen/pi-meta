@@ -16,6 +16,20 @@ export const capabilities: Capability[] = [
 			"synopsis formatting, worked examples). Read when the human wants to declutter the target.",
 		skillPath: resolveSkillPath("./skills/elision/SKILL.md"),
 	},
+	{
+		name: "tags",
+		description:
+			"How to read and apply tags on the target — the fold, resolving a tag to its messages, " +
+			"slicing around each, and back-filling judgment tags. Read when indexing or querying the target by tag.",
+		skillPath: resolveSkillPath("./skills/tags/SKILL.md"),
+	},
+	{
+		name: "move",
+		description:
+			"How to reposition a run of the target's messages within the view (turn-group unit, branch-replay " +
+			"model, cache doctrine). Read when the human wants scattered or spent context brought to the tail.",
+		skillPath: resolveSkillPath("./skills/move/SKILL.md"),
+	},
 ];
 
 function renderCapability(capability: Capability): string {

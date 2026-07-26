@@ -42,3 +42,7 @@ test("every registered capability points at a skill file that exists", () => {
 		expect(existsSync(capability.skillPath)).toBe(true);
 	}
 });
+
+test("the registry surfaces elision, tags, and move", () => {
+	expect(capabilities.map((capability) => capability.name)).toEqual(["elision", "tags", "move"]);
+});

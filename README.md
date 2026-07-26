@@ -22,6 +22,10 @@ capabilities to act on the target from within it.
   it. Takes no arguments: it spawns the thread and waits for you to say what you
   want to explore.
 - **`/back`** — from a meta thread, returns to the target.
+- **`/tag TYPE`** — from any session, mark messages with a named tag. Opens a
+  selection overlay over the conversation; arrow keys move, `Enter` toggles the
+  tag on the selected message, `Esc` closes. `/tag` alone browses; `/tag def
+  TYPE #HEX [--global]` defines or recolors a tag.
 
 Inside the meta thread you converse with an agent that can read the target's log
 and reason over it. What it can *do* to the target is a set of capabilities,
@@ -42,6 +46,24 @@ rewritten. The target's model sees only the synopsis.
 
 Capabilities only appear inside meta sessions — a normal session never sees the
 elision tool or its skill.
+
+### Tags
+
+Tags mark messages with named attributes — REGRESSION, CHECKPOINT, a skill read —
+so the session becomes an index over itself. You apply them in the target with
+`/tag`; the meta agent reads them (they are lines in the log) to answer questions
+like "pull a five-message radius around every REGRESSION" or "elide between the
+last two CHECKPOINTs," and can back-fill tags you didn't mark. Tags are invisible
+to the target model and never touch the running context — they live only in the
+log and in the `/tag` overlay. Skill reads are tagged automatically.
+
+### Move
+
+Move repositions a run of the target's messages within the view — for instance,
+bringing scattered skill reads to the window's tail where attention is hottest.
+Like elision it is non-destructive (the tree branches; originals are preserved)
+and meta-channel only: ask the meta agent, agree the run, and it replays the
+reordered tail.
 
 ## Install
 
