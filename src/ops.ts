@@ -44,9 +44,23 @@ function toElidedDetails(elided: BranchMessage[]): ElidedDetails {
 	};
 }
 
+function frameSynopsis(synopsis: string, count: number): string {
+	const removed = count === 1 ? "1 message was" : `${count} messages were`;
+	return [
+		`[ELISION — ${removed} removed from view. The summary between these markers replaces them.]`,
+		synopsis,
+		"[END ELISION — the documents, tool results, and reasoning behind this summary are no longer in context. Do not assert any fact above as verified; re-read or re-derive first.]",
+	].join("\n\n");
+}
+
 function executeStep(session: SessionLike, step: PlanStep, remap: RemapRecorder): void {
 	if (step.kind === "elide") {
-		session.appendCustomMessageEntry(ELIDED_TYPE, step.synopsis, true, toElidedDetails(step.elided));
+		session.appendCustomMessageEntry(
+			ELIDED_TYPE,
+			frameSynopsis(step.synopsis, step.elided.length),
+			true,
+			toElidedDetails(step.elided),
+		);
 	} else {
 		remap.record(step.message.id, session.appendMessage(step.message.message));
 	}

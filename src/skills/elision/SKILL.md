@@ -41,6 +41,11 @@ one call, non-overlapping regions.
 
 ## Writing the synopsis
 
+The tool wraps every synopsis in a fixed frame — a header naming how many
+messages were removed and a footer warning that the material behind the
+summary is out of context. Write content only; never add your own markers
+or re-derivation warnings.
+
 Each synopsis renders as **markdown** in its collapsed banner, so make it
 scannable, not a wall of text. Prefer a one-line bold gist followed by a short
 bullet list of the key points or decisions — a few bullets, not paragraphs:

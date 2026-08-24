@@ -60,6 +60,35 @@ test("the elision entry carries the verbatim of the messages it replaced", () =>
 	expect(elision.details?.verbatim).toHaveLength(2);
 });
 
+test("the elision content frames the synopsis between explicit markers", () => {
+	const manager = buildSession(6);
+	const original = activeMessages(manager);
+
+	applyElisions(manager as unknown as SessionLike, [
+		{ fromId: original[2].id, toId: original[3].id, synopsis: "S" },
+	]);
+
+	const content = (activeElisions(manager)[0] as { content?: unknown }).content as string;
+	const body = content.indexOf("S");
+	expect(body).toBeGreaterThan(0);
+	expect(content).toContain("2 messages");
+	expect(content.slice(body)).toMatch(/no longer in context/);
+	expect(content.slice(body)).toMatch(/re-read or re-derive/i);
+});
+
+test("a single elided message is framed in the singular", () => {
+	const manager = buildSession(4);
+	const original = activeMessages(manager);
+
+	applyElisions(manager as unknown as SessionLike, [
+		{ fromId: original[1].id, toId: original[1].id, synopsis: "S" },
+	]);
+
+	const content = (activeElisions(manager)[0] as { content?: unknown }).content as string;
+	expect(content).toContain("1 message ");
+	expect(content).not.toContain("1 messages");
+});
+
 test("a region starting at the first message replaces it rather than duplicating the tail", () => {
 	const manager = buildSession(4);
 	const original = activeMessages(manager);
